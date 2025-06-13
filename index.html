@@ -1,0 +1,276 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音乐统计</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #1a1a1a;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 2em;
+      margin-bottom: 20px;
+    }
+    .container {
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+    }
+    input[type="file"], input[type="color"] {
+      margin: 10px;
+      padding: 5px;
+      font-size: 16px;
+    }
+    input[type="color"] {
+      width: 100px;
+      height: 40px;
+      cursor: pointer;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #ff2d55;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    button:hover {
+      background-color: #e0264b;
+    }
+    canvas {
+      border: 2px solid #333;
+      margin-top: 20px;
+      max-width: 100%;
+      cursor: move;
+    }
+    .download-link {
+      display: none;
+      margin-top: 20px;
+      color: #ff2d55;
+      text-decoration: none;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>生成九图音乐统计（Canvas 拖动）</h1>
+    <label>选择背景颜色：</label>
+    <input type="color" id="bgColorInput" value="#1a1a1a" />
+    <input type="file" id="imageInput" accept="image/*" multiple />
+    <button onclick="generateImage()">生成图片</button>
+    <canvas id="canvas" width="600" height="600"></canvas>
+    <a id="downloadLink" class="download-link" href="#" download="music_stats.png">下载图片</a>
+  </div>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const bgColorInput = document.getElementById('bgColorInput');
+    const imageInput = document.getElementById('imageInput');
+    const downloadLink = document.getElementById('downloadLink');
+    let images = Array(9).fill(null); // 存储图片对象
+    let imageOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8]; // 图片顺序
+    let isDragging = false;
+    let draggedIndex = null;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    const imgSize = 160; // 图片大小
+    const gap = 20; // 图片间距
+    const startX = (canvas.width - 3 * imgSize - 2 * gap) / 2;
+    const startY = (canvas.height - 3 * imgSize - 2 * gap) / 2;
+
+    // 加载图片
+    imageInput.addEventListener('change', async () => {
+      const files = Array.from(imageInput.files).slice(0, 9);
+      images = Array(9).fill(null);
+      imageOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+      for (let i = 0; i < Math.min(files.length, 9); i++) {
+        images[i] = await loadImage(files[i]);
+      }
+    });
+
+    // 生成图片
+    async function generateImage() {
+      if (!images.some(img => img)) {
+        alert('请至少上传一张图片！');
+        return;
+      }
+      drawCanvas();
+      downloadLink.href = canvas.toDataURL('image/png');
+      downloadLink.style.display = 'block';
+    }
+
+    // 绘制 Canvas
+    function drawCanvas(dragged = null) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = bgColorInput.value;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 5;
+
+      for (let i = 0; i < 9; i++) {
+        const imgIndex = imageOrder[i];
+        if (images[imgIndex] && i !== dragged) {
+          const row = Math.floor(i / 3);
+          const col = i % 3;
+          const x = startX + col * (imgSize + gap);
+          const y = startY + row * (imgSize + gap);
+          drawImage(images[imgIndex], x, y);
+        }
+      }
+
+      // 绘制被拖动的图片（最后绘制，保持在顶层）
+      if (dragged !== null && images[imageOrder[dragged]]) {
+        ctx.save();
+        ctx.globalAlpha = 0.8; // 拖动时半透明
+        ctx.strokeStyle = '#ff2d55';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(dragOffsetX - imgSize / 2, dragOffsetY - imgSize / 2, imgSize, imgSize);
+        drawImage(images[imageOrder[dragged]], dragOffsetX - imgSize / 2, dragOffsetY - imgSize / 2);
+        ctx.restore();
+      }
+
+      ctx.shadowColor = 'transparent';
+    }
+
+    // 绘制单张图片
+    function drawImage(img, x, y) {
+      const srcSize = Math.min(img.width, img.height);
+      ctx.drawImage(
+        img,
+        (img.width - srcSize) / 2, (img.height - srcSize) / 2, srcSize, srcSize,
+        x, y, imgSize, imgSize
+      );
+    }
+
+    // 加载图片的 Promise
+    function loadImage(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          img.src = e.target.result;
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Canvas 拖动事件
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      draggedIndex = getImageIndex(mouseX, mouseY);
+      if (draggedIndex !== null) {
+        isDragging = true;
+        dragOffsetX = mouseX;
+        dragOffsetY = mouseY;
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        const rect = canvas.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+        dragOffsetY = e.clientY - rect.top;
+        requestAnimationFrame(() => drawCanvas(draggedIndex));
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (isDragging) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const targetIndex = getImageIndex(mouseX, mouseY);
+        if (targetIndex !== null && targetIndex !== draggedIndex && images[imageOrder[targetIndex]]) {
+          [imageOrder[draggedIndex], imageOrder[targetIndex]] = [imageOrder[targetIndex], imageOrder[draggedIndex]];
+        }
+        isDragging = false;
+        draggedIndex = null;
+        drawCanvas();
+        downloadLink.href = canvas.toDataURL('image/png');
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDragging) {
+        isDragging = false;
+        draggedIndex = null;
+        drawCanvas();
+        downloadLink.href = canvas.toDataURL('image/png');
+      }
+    });
+
+    // 获取鼠标点击的图片索引
+    function getImageIndex(mouseX, mouseY) {
+      for (let i = 0; i < 9; i++) {
+        const row = Math.floor(i / 3);
+        const col = i % 3;
+        const x = startX + col * (imgSize + gap);
+        const y = startY + row * (imgSize + gap);
+        if (
+          mouseX >= x && mouseX <= x + imgSize &&
+          mouseY >= y && mouseY <= y + imgSize &&
+          images[imageOrder[i]]
+        ) {
+          return i;
+        }
+      }
+      return null;
+    }
+  </script>
+</body>
+</html>
