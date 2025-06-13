@@ -42,7 +42,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>音乐统计</title>
+  <title>生成九宫格图片（支持拖动与列表）</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Arial', sans-serif;
@@ -59,19 +60,24 @@
       margin-bottom: 20px;
     }
     .container {
-      max-width: 600px;
+      max-width: 800px;
       width: 100%;
       text-align: center;
     }
-    input[type="file"], input[type="color"] {
+    input[type="file"], input[type="color"], input[type="text"], select {
       margin: 10px;
       padding: 5px;
       font-size: 16px;
+      width: 80%;
+      max-width: 400px;
     }
     input[type="color"] {
       width: 100px;
       height: 40px;
       cursor: pointer;
+    }
+    select {
+      width: 200px;
     }
     button {
       padding: 10px 20px;
@@ -89,7 +95,7 @@
       border: 2px solid #333;
       margin-top: 20px;
       max-width: 100%;
-      cursor: move;
+      touch-action: none;
     }
     .download-link {
       display: none;
@@ -98,44 +104,178 @@
       text-decoration: none;
       font-size: 18px;
     }
+    .notice {
+      color: #ff2d55;
+      font-size: 14px;
+      margin: 10px 0;
+    }
+    .list-inputs, .list-display {
+      margin-top: 20px;
+      text-align: left;
+      width: 80%;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .list-inputs input {
+      margin-bottom: 10px;
+    }
+    .list-display ul {
+      list-style: none;
+      padding: 0;
+    }
+    .list-display li {
+      font-size: 16px;
+      margin-bottom: 5px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>生成九图音乐统计（Canvas 拖动）</h1>
+    <h1>生成九宫格图片（支持拖动与列表）</h1>
+    <p class="notice">
+      请上传1-9张图片并填写对应列表信息（如“专辑名 - 歌手名”），列表将显示在图片右侧，仅限个人非商业用途。
+    </p>
     <label>选择背景颜色：</label>
     <input type="color" id="bgColorInput" value="#1a1a1a" />
+    <label>选择列表字体：</label>
+    <select id="fontSelect">
+      <option value="Arial">Arial</option>
+      <option value="Times New Roman">Times New Roman</option>
+      <option value="SimSun">宋体</option>
+      <option value="Microsoft YaHei">微软雅黑</option>
+      <option value="Noto Sans SC">Noto Sans SC</option>
+      <option value="Helvetica">Helvetica</option>
+      <option value="Verdana">Verdana</option>
+      <option value="Trebuchet MS">Trebuchet MS</option>
+      <option value="Palatino">Palatino</option>
+      <option value="Georgia">Georgia</option>
+      <option value="Courier New">Courier New</option>
+    </select>
+    <label>选择列表字体颜色：</label>
+    <input type="color" id="fontColorInput" value="#ffffff" />
+    <label>上传图片（最多9张）：</label>
     <input type="file" id="imageInput" accept="image/*" multiple />
-    <button onclick="generateImage()">生成图片</button>
-    <canvas id="canvas" width="600" height="600"></canvas>
-    <a id="downloadLink" class="download-link" href="#" download="music_stats.png">下载图片</a>
+    <div class="list-inputs" id="listInputs"></div>
+    <button onclick="generateImage()">生成九宫格</button>
+    <canvas id="canvas"></canvas>
+    <div class="list-display" id="listDisplay"></div>
+    <a id="downloadLink" class="download-link" href="#" download="grid_image.png">下载图片</a>
   </div>
   <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const bgColorInput = document.getElementById('bgColorInput');
     const imageInput = document.getElementById('imageInput');
+    const fontSelect = document.getElementById('fontSelect');
+    const fontColorInput = document.getElementById('fontColorInput');
+    const listInputs = document.getElementById('listInputs');
+    const listDisplay = document.getElementById('listDisplay');
     const downloadLink = document.getElementById('downloadLink');
-    let images = Array(9).fill(null); // 存储图片对象
-    let imageOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8]; // 图片顺序
+    let images = Array(9).fill(null);
+    let imageOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let listItems = [];
     let isDragging = false;
     let draggedIndex = null;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
-    const imgSize = 160; // 图片大小
-    const gap = 20; // 图片间距
-    const startX = (canvas.width - 3 * imgSize - 2 * gap) / 2;
-    const startY = (canvas.height - 3 * imgSize - 2 * gap) / 2;
+    const imgSize = 160;
+    const gap = 20;
+    const gridWidth = 600;
+    const gridHeight = 600;
+    const listFontSize = 16;
+    const listLineHeight = 30;
+    const listMarginLeft = 20;
+    const listPadding = 20;
 
-    // 加载图片
+    // 设置 Canvas 初始大小
+    canvas.width = gridWidth;
+    canvas.height = gridHeight;
+
+    // 上传图片并生成输入框
     imageInput.addEventListener('change', async () => {
       const files = Array.from(imageInput.files).slice(0, 9);
       images = Array(9).fill(null);
       imageOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+      listItems = Array(files.length).fill('');
+      listInputs.innerHTML = '';
+      listDisplay.innerHTML = '';
+
       for (let i = 0; i < Math.min(files.length, 9); i++) {
-        images[i] = await loadImage(files[i]);
+        try {
+          images[i] = await loadImage(files[i]);
+          // 生成输入框
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.placeholder = `请输入第${i + 1}项（如：专辑名 - 歌手名）`;
+          input.dataset.index = i;
+          input.addEventListener('input', (e) => {
+            listItems[i] = e.target.value;
+            updateListDisplay();
+            generateImage();
+          });
+          listInputs.appendChild(input);
+        } catch (error) {
+          console.error(`加载本地图片 ${i} 失败:`, error);
+          alert(`图片 ${files[i].name} 加载失败，请检查文件格式！`);
+        }
+      }
+      if (files.length > 0) {
+        generateImage();
       }
     });
+
+    // 更新列表显示
+    function updateListDisplay() {
+      listDisplay.innerHTML = '';
+      const ul = document.createElement('ul');
+      ul.style.fontFamily = fontSelect.value;
+      ul.style.color = fontColorInput.value;
+      listItems.forEach((item, i) => {
+        if (item.trim()) {
+          const li = document.createElement('li');
+          li.textContent = `${i + 1}. ${item}`;
+          ul.appendChild(li);
+        }
+      });
+      listDisplay.appendChild(ul);
+    }
+
+    // 字体和颜色变化时更新
+    fontSelect.addEventListener('change', () => {
+      updateListDisplay();
+      generateImage();
+    });
+    fontColorInput.addEventListener('change', () => {
+      updateListDisplay();
+      generateImage();
+    });
+
+    // 计算 Canvas 大小
+    function calculateCanvasSize() {
+      // 检查是否有非空列表项
+      const hasList = listItems.some(item => item.trim());
+      
+      if (!hasList) {
+        canvas.width = gridWidth;
+        canvas.height = gridHeight;
+        return;
+      }
+
+      ctx.font = `${listFontSize}px ${fontSelect.value}`;
+      let listWidth = 200; // 最小宽度
+      let listHeight = listItems.filter(item => item.trim()).length * listLineHeight + listPadding * 2;
+      
+      listItems.forEach((item, i) => {
+        if (item.trim()) {
+          const textWidth = ctx.measureText(`${i + 1}. ${item}`).width;
+          listWidth = Math.max(listWidth, textWidth + listPadding * 2);
+        }
+      });
+
+      canvas.width = gridWidth + listMarginLeft + Math.ceil(listWidth);
+      canvas.height = Math.max(gridHeight, listHeight);
+    }
 
     // 生成图片
     async function generateImage() {
@@ -143,7 +283,9 @@
         alert('请至少上传一张图片！');
         return;
       }
+      calculateCanvasSize();
       drawCanvas();
+      updateListDisplay();
       downloadLink.href = canvas.toDataURL('image/png');
       downloadLink.style.display = 'block';
     }
@@ -153,10 +295,15 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = bgColorInput.value;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 绘制九宫格
       ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
       ctx.shadowBlur = 10;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 5;
+
+      const startX = (gridWidth - 3 * imgSize - 2 * gap) / 2;
+      const startY = (gridHeight - 3 * imgSize - 2 * gap) / 2;
 
       for (let i = 0; i < 9; i++) {
         const imgIndex = imageOrder[i];
@@ -169,10 +316,9 @@
         }
       }
 
-      // 绘制被拖动的图片（最后绘制，保持在顶层）
       if (dragged !== null && images[imageOrder[dragged]]) {
         ctx.save();
-        ctx.globalAlpha = 0.8; // 拖动时半透明
+        ctx.globalAlpha = 0.8;
         ctx.strokeStyle = '#ff2d55';
         ctx.lineWidth = 2;
         ctx.strokeRect(dragOffsetX - imgSize / 2, dragOffsetY - imgSize / 2, imgSize, imgSize);
@@ -181,6 +327,24 @@
       }
 
       ctx.shadowColor = 'transparent';
+
+      // 绘制列表（仅当有非空列表项时）
+      if (listItems.some(item => item.trim())) {
+        ctx.font = `${listFontSize}px ${fontSelect.value}`;
+        ctx.fillStyle = fontColorInput.value;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        const listX = gridWidth + listMarginLeft + listPadding;
+        let listY = listPadding;
+
+        listItems.forEach((item, i) => {
+          if (item.trim()) {
+            ctx.fillText(`${i + 1}. ${item}`, listX, listY);
+            listY += listLineHeight;
+          }
+        });
+      }
     }
 
     // 绘制单张图片
@@ -193,7 +357,7 @@
       );
     }
 
-    // 加载图片的 Promise
+    // 加载本地图片
     function loadImage(file) {
       return new Promise((resolve, reject) => {
         const img = new Image();
@@ -207,34 +371,64 @@
       });
     }
 
-    // Canvas 拖动事件
-    canvas.addEventListener('mousedown', (e) => {
+    // 获取事件坐标
+    function getEventPosition(e) {
       const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      draggedIndex = getImageIndex(mouseX, mouseY);
+      const clientX = e.type.startsWith('touch') ? e.changedTouches[0].clientX : e.clientX;
+      const clientY = e.type.startsWith('touch') ? e.changedTouches[0].clientY : e.clientY;
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+      };
+    }
+
+    // 获取图片索引
+    function getImageIndex(x, y) {
+      const startX = (gridWidth - 3 * imgSize - 2 * gap) / 2;
+      const startY = (gridHeight - 3 * imgSize - 2 * gap) / 2;
+      for (let i = 0; i < 9; i++) {
+        const row = Math.floor(i / 3);
+        const col = i % 3;
+        const imgX = startX + col * (imgSize + gap);
+        const imgY = startY + row * (imgSize + gap);
+        if (
+          x >= imgX && x <= imgX + imgSize &&
+          y >= imgY && y <= imgY + imgSize &&
+          images[imageOrder[i]]
+        ) {
+          return i;
+        }
+      }
+      return null;
+    }
+
+    // 拖动事件
+    function handleDragStart(e) {
+      e.preventDefault();
+      const { x, y } = getEventPosition(e);
+      draggedIndex = getImageIndex(x, y);
       if (draggedIndex !== null) {
         isDragging = true;
-        dragOffsetX = mouseX;
-        dragOffsetY = mouseY;
+        dragOffsetX = x;
+        dragOffsetY = y;
       }
-    });
+    }
 
-    canvas.addEventListener('mousemove', (e) => {
+    function handleDragMove(e) {
       if (isDragging) {
-        const rect = canvas.getBoundingClientRect();
-        dragOffsetX = e.clientX - rect.left;
-        dragOffsetY = e.clientY - rect.top;
+        e.preventDefault();
+        const { x, y } = getEventPosition(e);
+        dragOffsetX = x;
+        dragOffsetY = y;
         requestAnimationFrame(() => drawCanvas(draggedIndex));
       }
-    });
+    }
 
-    canvas.addEventListener('mouseup', (e) => {
+    function handleDragEnd(e) {
       if (isDragging) {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const targetIndex = getImageIndex(mouseX, mouseY);
+        e.preventDefault();
+        const { x, y } = getEventPosition(e);
+        const targetIndex = getImageIndex(x, y);
         if (targetIndex !== null && targetIndex !== draggedIndex && images[imageOrder[targetIndex]]) {
           [imageOrder[draggedIndex], imageOrder[targetIndex]] = [imageOrder[targetIndex], imageOrder[draggedIndex]];
         }
@@ -243,8 +437,14 @@
         drawCanvas();
         downloadLink.href = canvas.toDataURL('image/png');
       }
-    });
+    }
 
+    canvas.addEventListener('mousedown', handleDragStart);
+    canvas.addEventListener('mousemove', handleDragMove);
+    canvas.addEventListener('mouseup', handleDragEnd);
+    canvas.addEventListener('touchstart', handleDragStart);
+    canvas.addEventListener('touchmove', handleDragMove);
+    canvas.addEventListener('touchend', handleDragEnd);
     canvas.addEventListener('mouseleave', () => {
       if (isDragging) {
         isDragging = false;
@@ -253,24 +453,6 @@
         downloadLink.href = canvas.toDataURL('image/png');
       }
     });
-
-    // 获取鼠标点击的图片索引
-    function getImageIndex(mouseX, mouseY) {
-      for (let i = 0; i < 9; i++) {
-        const row = Math.floor(i / 3);
-        const col = i % 3;
-        const x = startX + col * (imgSize + gap);
-        const y = startY + row * (imgSize + gap);
-        if (
-          mouseX >= x && mouseX <= x + imgSize &&
-          mouseY >= y && mouseY <= y + imgSize &&
-          images[imageOrder[i]]
-        ) {
-          return i;
-        }
-      }
-      return null;
-    }
   </script>
 </body>
 </html>
